@@ -32,6 +32,15 @@ class RiskState:
     daily_paused: bool = False
     halted: bool = False
 
+    def __post_init__(self):
+        values = (self.high_water, self.day_start, self.last_equity)
+        if any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) or x <= 0 for x in values):
+            raise ValueError("Invalid persisted risk balances")
+        if self.high_water < max(self.day_start, self.last_equity):
+            raise ValueError("Persisted high-water mark is inconsistent")
+        if type(self.day) is not int or self.day < -1 or type(self.daily_paused) is not bool or type(self.halted) is not bool:
+            raise ValueError("Invalid persisted risk flags")
+
     def observe(self, timestamp, equity, config):
         day = timestamp // 86400
         if day != self.day:

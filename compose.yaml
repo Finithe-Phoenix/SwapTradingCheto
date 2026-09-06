@@ -1,7 +1,7 @@
 services:
   freqtrade:
     build: .
-    image: swaptradingcheto:0.1.0
+    image: swaptradingcheto:0.2.0
     restart: unless-stopped
     stop_grace_period: 30s
     ports:

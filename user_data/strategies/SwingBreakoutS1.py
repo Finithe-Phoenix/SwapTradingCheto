@@ -2,6 +2,7 @@
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 import math
+import logging
 from pathlib import Path
 
 from freqtrade.persistence import Trade
@@ -11,6 +12,8 @@ from trading_lab.config import LabConfig
 from trading_lab.market import Candle, evaluate
 from trading_lab.risk import Costs, RiskState, position_size
 from trading_lab.storage import Journal
+
+logger = logging.getLogger(__name__)
 
 
 def candles(frame):
@@ -53,6 +56,7 @@ class SwingBreakoutS1(IStrategy):
         self.intents = {}
         self.reservations = {}
         self.snapshot = None
+        self.last_health_error = None
 
     def informative_pairs(self):
         return [(p, "1d") for p in self.lab.pairs]
@@ -78,6 +82,7 @@ class SwingBreakoutS1(IStrategy):
 
     def bot_start(self, **kwargs):
         self.ready = False
+        self.snapshot = None
         mode = self.config.get("runmode")
         if getattr(mode, "value", mode) == "dry_run":
             self.journal = Journal(Path(self.config["user_data_dir"]) / "risk.paper.sqlite")
@@ -86,6 +91,9 @@ class SwingBreakoutS1(IStrategy):
                 if saved["config_sha256"] != self.lab.fingerprint():
                     raise ValueError("Risk configuration changed; archive the previous paper experiment first")
                 self.state = RiskState(**saved["state"])
+            elif Trade.get_trades_proxy():
+                raise ValueError("Trade history exists but risk state is missing; restore both databases from the same backup")
+            self._persist()
         self.ready = True
 
     def _row(self, pair, current_time):
@@ -99,6 +107,13 @@ class SwingBreakoutS1(IStrategy):
     def _persist(self):
         if self.journal:
             self.journal.save("risk", {"config_sha256": self.lab.fingerprint(), "state": asdict(self.state)})
+
+    def _health(self, current_time, error=None):
+        if self.journal:
+            self.journal.save("health", {"timestamp": int(current_time.timestamp()),
+                                        "status": "blocked" if error or self.state.blocked else "ready",
+                                        "error": error, "risk_state": asdict(self.state),
+                                        "open_positions": len(self.snapshot["pairs"]) if self.snapshot else None})
 
     def bot_loop_start(self, current_time: datetime, **kwargs):
         self.snapshot = None  # A failed refresh must never reuse a previous admission snapshot.
@@ -122,20 +137,36 @@ class SwingBreakoutS1(IStrategy):
                     rate = float(self._row(trade.pair, current_time)["close"])
                 if not rate or not math.isfinite(rate) or rate <= 0:
                     raise ValueError("Invalid valuation price")
-                equity += trade.calculate_profit(rate).profit_abs
+                profit = trade.calculate_profit(rate).profit_abs
+                if not math.isfinite(profit) or not math.isfinite(trade.amount) or trade.amount <= 0:
+                    raise ValueError("Invalid position valuation")
+                equity += profit
                 exposure += trade.amount * rate
                 reserved = trade.get_custom_data("initial_risk")
-                if reserved is None:
-                    raise ValueError("Missing persisted trade risk")
+                if reserved is None or not math.isfinite(float(reserved)) or float(reserved) <= 0:
+                    raise ValueError("Missing or invalid persisted trade risk")
                 risk += float(reserved)
             self.state.observe(int(current_time.timestamp()), equity, self.lab)
             self._persist()
             self.reservations = {p: r for p, r in self.reservations.items() if r["expires"] > current_time.timestamp()}
             self.snapshot = {"equity": equity, "cash": self.wallets.get_free("USDT"), "exposure": exposure,
                              "risk": risk, "pairs": {t.pair for t in trades}, "time": current_time.timestamp()}
-        except Exception:
+            if not math.isfinite(self.snapshot["cash"]) or self.snapshot["cash"] < 0:
+                raise ValueError("Invalid available paper balance")
+            self._health(current_time)
+            if self.last_health_error is not None:
+                logger.info("Risk valuation recovered; persisted pause flags remain in force")
+            self.last_health_error = None
+        except Exception as exc:
             self.snapshot = None
-            self.logger.warning("Risk snapshot unavailable; new entries are blocked", exc_info=True) if hasattr(self, "logger") else None
+            error = f"{type(exc).__name__}: {exc}"
+            if error != self.last_health_error:
+                logger.warning("Risk snapshot unavailable; new entries are blocked: %s", error)
+            self.last_health_error = error
+            try:
+                self._health(current_time, error)
+            except Exception:
+                logger.error("Could not persist paper health; entries remain blocked")
 
     def _context(self, pair, current_time):
         if not self.ready or self.snapshot is None or self.state.blocked or pair not in self.lab.pairs:

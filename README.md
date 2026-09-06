@@ -4,7 +4,7 @@
 
 Laboratorio cuantitativo de **swing trading spot en BTC y ETH**. Incluye investigación histórica reproducible, replay con costes, controles de cartera y una integración de paper trading con Freqtrade 2026.8.
 
-**Versión 0.1.0: simulación exclusivamente.** La demo usa datos sintéticos identificados como tales. Sus resultados comprueban mecánica, no rentabilidad. Este proyecto no incluye una transición automática a operaciones reales.
+**Versión 0.2.0: simulación exclusivamente.** Incluye una primera evaluación exploratoria sobre precios históricos reales y un diagnóstico de cobertura. La muestra contiene solo 10 operaciones; todavía no acredita una ventaja estadística. La demo sigue usando datos sintéticos identificados como tales. Este proyecto no incluye una transición automática a operaciones reales.
 
 ## Qué puedes ejecutar
 
@@ -13,9 +13,10 @@ Laboratorio cuantitativo de **swing trading spot en BTC y ETH**. Incluye investi
 | Estrategia S1 | Velas 4h, filtro diario EMA200, ruptura de 20 velas, ATR14 y salida de 10 velas. |
 | Riesgo | 0.25% por entrada, 0.50% conjunto, 40% de exposición máxima, pausas diaria y por caída. |
 | Replay | Cartera conjunta BTC/ETH; costes y tamaños recalculados; stops adversos y retraso de ejecución. |
-| Datos | Descarga pública de velas 1h, agregación 4h/1d, manifiesto SHA-256 y auditoría estricta. |
-| Resultados | JSON, CSV, Markdown y registro SQLite; referencias de efectivo y comprar/mantener 50/50. |
-| Integración | Adaptador Freqtrade, perfil simulado, panel FreqUI local y estado de riesgo persistente. |
+| Datos | Descarga pública reanudable, páginas con SHA-256, diagnóstico de huecos y extracción explícita de tramos continuos. |
+| Resultados | JSON, CSV, Markdown y SQLite; desglose mensual/anual de una cartera continua, pausas, filtros de evidencia y referencias. |
+| Evaluación temporal | Etapas declaradas, calentamiento exigido y recorte de datos futuros; prueba final reservada. |
+| Integración | Adaptador Freqtrade, panel FreqUI local, pausas persistentes y diagnóstico de estado de solo lectura. |
 | CI | Pruebas del motor, pruebas con Freqtrade real, demo reproducible y construcción del contenedor. |
 
 ## Arranque rápido: demo sin cuenta de exchange
@@ -64,18 +65,43 @@ El descargador accede únicamente a los endpoints públicos `klines` y `exchange
 Prueba primero un intervalo pequeño:
 
 ```bash
-trading-lab download --start 2026-08-01 --end 2026-08-08 --output data/smoke-202608
-trading-lab audit --data data/smoke-202608
+trading-lab download --start 2023-08-01 --end 2023-08-08 --output data/smoke-202308
+trading-lab audit --data data/smoke-202308
 ```
 
 Ese intervalo **no contiene el calentamiento necesario para EMA200 diaria**. Para investigar con la estrategia completa, descarga suficiente pasado y separa el periodo de evaluación:
 
 ```bash
-trading-lab download --start 2019-01-01 --end 2026-09-01 --output data/history-2019-2026
-trading-lab run --data data/history-2019-2026 --start 2020-01-01 --end 2024-01-01 --output runs/development-001
+trading-lab download --start 2019-01-01 --end 2024-01-01 --output data/development-2019-2023
 ```
 
-La descarga amplia puede tardar y depende de la cobertura disponible. Un hueco detiene la auditoría. Los tamaños mínimos registrados son los actuales; no se reconstruyen cambios históricos de filtros del exchange.
+**Resultado observado:** esta fuente devuelve 60 horas ausentes por activo en ese intervalo. La descarga conserva las páginas, publica el diagnóstico de cobertura y termina con error; no crea un dataset válido ni rellena velas. Véase [la evidencia de cobertura](docs/evidence/coverage-2019-2023.json).
+
+Una interrupción de red se reanuda con las mismas fechas y destino:
+
+```bash
+trading-lab download --start 2019-01-01 --end 2024-01-01 --output data/development-2019-2023 --resume
+trading-lab inspect-download --cache data/development-2019-2023.download
+```
+
+`--resume` verifica las páginas guardadas; no corrige huecos históricos. Ejecuta una sola descarga por destino. Conserva el directorio `.download` junto a sus diagnósticos. Los filtros de mínimos registrados corresponden al momento de la descarga; no reconstruyen cambios históricos del exchange.
+
+Para repetir el diagnóstico publicado, extrae el tramo continuo elegido por cobertura, sin cambiar S1:
+
+```bash
+trading-lab extract --cache data/development-2019-2023.download --start 2021-09-30 --end 2023-03-24 --output data/development-contiguous
+trading-lab run --data data/development-contiguous --start 2022-05-01 --end 2023-03-24 --output runs/development-contiguous-001
+```
+
+Usa 213 días completos de calentamiento y evalúa 327 días. Es un diagnóstico parcial de desarrollo, no una validación independiente. [Resultados y límites](docs/VALIDATION.md).
+
+Para un dataset que sí cubra íntegramente la etapa declarada:
+
+```bash
+trading-lab evaluate --data data/complete-development --stage development --output runs/declared-development-001
+```
+
+`evaluate` usa `configs/research.json`, exige su calentamiento de 365 días y recorta el futuro antes del replay. Solo admite `development` o `validation`; el periodo final reservado no forma parte de ese comando. No reajusta parámetros ni reinicia el riesgo cada año. La cobertura descargada arriba todavía impide completar esa etapa. `run` es una herramienta exploratoria con fechas explícitas; registra cualquier uso que consuma periodos reservados.
 
 Las comisiones de `configs/lab.json` son **supuestos de laboratorio**, no una tarifa vigente de tu cuenta. El escenario adverso duplica comisión, spread y deslizamiento, y vuelve a calcular la cartera. No basta con restar costes de una lista de operaciones ya seleccionada.
 
@@ -88,6 +114,7 @@ trading-lab init
 docker compose build
 docker compose up -d
 docker compose logs --tail 100 freqtrade
+trading-lab paper-status --directory user_data
 ```
 
 Abre **http://localhost:8080**. Usuario: `lab`. La contraseña única se genera en `.env` como `LAB_UI_PASSWORD`; consúltala localmente. `.env` y la configuración de ejecución no se suben a Git. Si ya existe `.env`, `init` conserva el archivo y devuelve un error explicativo.
@@ -100,12 +127,12 @@ Para detenerlo:
 docker compose down
 ```
 
-El estado virtual permanece en `user_data`. Detener el proceso interrumpe también la simulación de protección; usa las pausas del bot para frenar entradas mientras sigues observando posiciones.
+El estado virtual permanece en `user_data`. Detener el proceso interrumpe también la simulación de protección; usa las pausas del bot para frenar entradas mientras sigues observando posiciones. `paper-status` informa la última señal de estado del control de riesgo: salida 0 si admite entradas, 3 si faltan datos, están vencidos o existe una pausa, y 2 si el estado es inválido. Consulta [recuperación y diagnóstico](docs/OPERATIONS.md).
 
 Los comandos del motor usan sus propios históricos, separados de los CSV del replay:
 
 ```bash
-docker compose run --rm freqtrade download-data --timeframes 1h 4h 1d --timerange 20190101-20260901
+docker compose run --rm freqtrade download-data --timeframes 1h 4h 1d --timerange 20190101-20240101
 docker compose run --rm freqtrade backtesting --timeframe-detail 1h --timerange 20200101-20240101
 ```
 
@@ -121,8 +148,8 @@ Las pausas bloquean nuevas entradas y mantienen la gestión de salidas. El lími
 
 ## Estado y siguientes validaciones
 
-El repositorio entrega código y pruebas de funcionamiento. La demo sintética no prueba ingresos y no se ha completado una observación prospectiva de 4–8 semanas ni una evaluación independiente de rentabilidad. Véase [VALIDATION.md](docs/VALIDATION.md) para resultados comprobados y límites conocidos.
+El repositorio entrega código, pruebas y evidencia histórica parcial. El diagnóstico sobre precios reales pasa algunos filtros, pero falla la muestra de 100 operaciones y la sensibilidad del intervalo exploratorio. No se ha completado una observación prospectiva de 4–8 semanas ni una evaluación independiente de rentabilidad. Véase [VALIDATION.md](docs/VALIDATION.md) para resultados comprobados y límites conocidos.
 
-El siguiente trabajo de investigación es auditar un histórico amplio, congelar S1, ejecutar validación temporal, comparar los dos motores y acumular datos prospectivos. El objetivo de 100 operaciones sirve para revisar evidencia; no activa dinero real.
+El siguiente trabajo es definir y probar el tratamiento de interrupciones históricas del mercado, completar desarrollo, comparar los dos motores y acumular datos prospectivos. La validación 2024–2025 y la prueba final 2026 permanecen sin evaluar en esta versión. El objetivo de 100 operaciones sirve para revisar evidencia; no activa dinero real.
 
 Documentación adicional: [diseño](docs/ARCHITECTURE.md), [plan y alcance](docs/PLAN.md) y [operación](docs/OPERATIONS.md).

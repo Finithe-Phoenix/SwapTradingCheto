@@ -6,9 +6,12 @@
 |---|---|
 | `market.py` | Velas, agregación UTC, EMA, ATR y señales S1 compartidas. |
 | `risk.py` | Costes, presupuestos, dimensionamiento y estado de pausa. |
-| `data.py` | Fuente pública, auditoría, CSV y manifiestos verificables. |
+| `data.py` | Fuente pública, páginas reanudables, auditoría, extracción explícita y manifiestos. |
 | `replay.py` | Secuencia horaria, cartera común, fills adversos, stops y entradas rechazadas. |
-| `metrics.py` | Métricas netas, referencias e intervalos exploratorios por bloques diarios. |
+| `metrics.py` | Métricas netas, calendario continuo, pausas e intervalos exploratorios por bloques diarios. |
+| `research.py` | Etapas declaradas, calentamiento, corte temporal y filtros de evidencia. |
+| `reporting.py` | Informe en español y hashes de fuentes/configuración, incluso con cambios locales. |
+| `status.py` | Lectura del estado de paper trading, antigüedad de la última señal y motivo de bloqueo. |
 | `storage.py` | Snapshots y eventos SQLite con escritura transaccional e IDs idempotentes. |
 | `cli.py` | Demo, descarga, auditoría y reportes de experimentos. |
 | `SwingBreakoutS1.py` | Adaptador a Freqtrade y controles previos a entradas simuladas. |
@@ -18,6 +21,16 @@
 En cada hora se valoran posiciones al precio de apertura y se revisa el presupuesto. Se procesan stops con salto y salidas pendientes; después, señales que ya estaban disponibles. Se calcula tamaño con costes y riesgo conjunto, luego se consideran stops dentro de la hora y se valora el cierre. El orden de activos es estable. La vela final liquida posiciones con los mismos costes para reconciliar P&L y efectivo.
 
 El replay de costes adversos vuelve a ejecutar las señales candidatas: los costes cambian efectivo, patrimonio, tamaño y admisión. Un ajuste posterior de P&L no sustituye este cálculo.
+
+Los desgloses mensuales y anuales se calculan a partir de una sola curva continua por escenario. Las operaciones, el efectivo y la pausa por caída no se reinician en enero. La última marca de cada mes pertenece al retorno del intervalo que termina en ella; la siguiente empieza con ese mismo patrimonio. La caída dentro del mes/año es una estadística local y no sustituye el máximo de toda la ejecución.
+
+`evaluate` prepara exclusivamente la etapa declarada y su calentamiento; ninguna vela posterior al final entra en el motor. El plan y su hash se conservan junto a los resultados. El comando exploratorio `run` registra el calentamiento realmente disponible y avisa si no alcanza para la EMA diaria.
+
+## Integridad de datos
+
+La descarga conserva un checkpoint y páginas JSON con SHA-256 en un directorio contiguo al destino. Cada página se valida y el checkpoint se reemplaza tras completar la escritura. `--resume` exige la misma fuente, fechas y universo; verifica hashes y secuencia antes de continuar. No deben ejecutarse dos escritores sobre el mismo destino.
+
+Un hueco impide publicar un dataset para replay. El informe de cobertura y los tramos comunes de ambos activos permiten investigar sin inventar precios. `extract` exige fechas explícitas, comprueba continuidad y conserva el origen y la procedencia del subconjunto. Extraer un tramo no transforma una evaluación parcial en una prueba del histórico completo.
 
 Las velas 1h no describen el orden exacto de ticks. Los stops durante una hora usan supuestos conservadores y los saltos se ejecutan al precio de apertura desfavorable. No se simulan cola de prioridad, profundidad histórica, impacto no lineal o latencia medida de red.
 
@@ -38,3 +51,5 @@ La valoración del replay usa liquidación estimada neta de costes. En Freqtrade
 La investigación offline utiliza la biblioteca estándar de Python. El paper trading usa la imagen publicada `freqtradeorg/freqtrade:2026.8` y el mismo código de señales y dimensionamiento. Las claves de API de exchange permanecen vacías. El punto de entrada rechaza modo real y sobrescrituras de entorno; la estrategia verifica también su propio modo.
 
 Fuentes técnicas consultadas el 6 de septiembre de 2026: [Freqtrade 2026.8](https://github.com/freqtrade/freqtrade/releases/tag/2026.8), [callbacks](https://www.freqtrade.io/en/stable/strategy-callbacks/), [supuestos de backtest](https://www.freqtrade.io/en/stable/backtesting/#assumptions-made-by-backtesting) y [datos públicos de Binance](https://developers.binance.com/en/docs/introduction).
+
+La paginación usa el endpoint público de [velas de Binance](https://developers.binance.com/en/docs/catalog/core-trading-spot-trading/api/rest-api/market) y registra los [filtros publicados del mercado](https://developers.binance.com/en/docs/products/spot/filters). Se conservan los filtros completos, pero el dimensionamiento del replay aplica precisión y mínimos; no reconstruye su evolución histórica ni todos los controles del motor de órdenes.

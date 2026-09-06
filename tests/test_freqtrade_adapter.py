@@ -10,6 +10,8 @@ from unittest.mock import patch
 
 from trading_lab.data import synthetic, load_dataset
 from trading_lab.market import aggregate, signals
+from trading_lab.storage import Journal
+from trading_lab.status import paper_status
 
 ROOT = Path(__file__).resolve().parents[1]
 HAS_FREQTRADE = importlib.util.find_spec("freqtrade") is not None
@@ -124,6 +126,45 @@ class FreqtradeTests(unittest.TestCase):
         with patch.object(Trade, "get_trades_proxy", return_value=[trade]), patch.object(Trade, "get_total_closed_profit", return_value=0):
             self.strategy.bot_loop_start(self.now)
         self.assertIsNone(self.strategy.snapshot)
+
+    def test_restart_without_risk_state_and_existing_trades_is_blocked(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.strategy.config["user_data_dir"] = Path(folder)
+            with patch.object(Trade, "get_trades_proxy", return_value=[object()]):
+                with self.assertRaisesRegex(ValueError, "risk state is missing"):
+                    self.strategy.bot_start()
+            self.assertFalse(self.strategy.ready)
+            self.assertIsNone(self.strategy.snapshot)
+            self.strategy.journal.close()
+
+    def test_restart_preserves_drawdown_pause(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.strategy.config["user_data_dir"] = Path(folder)
+            saved = Journal(Path(folder) / "risk.paper.sqlite")
+            saved.save("risk", {"config_sha256": self.strategy.lab.fingerprint(),
+                                "state": dict(high_water=1000, day_start=1000, last_equity=940, halted=True)})
+            saved.close()
+            self.strategy.bot_start()
+            self.assertTrue(self.strategy.state.halted)
+            self.assertEqual(self.stake(), 0)
+            self.strategy.journal.close()
+
+    def test_failure_and_recovery_publish_health_without_clearing_pause(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.strategy.journal = Journal(Path(folder) / "risk.paper.sqlite")
+            self.strategy.wallets = SimpleNamespace(get_free=lambda currency: 1000)
+            self.strategy.state.halted = True
+            self.strategy._persist()
+            with patch.object(Trade, "get_trades_proxy", side_effect=RuntimeError("test outage")):
+                with self.assertLogs(module.logger, level="WARNING"):
+                    self.strategy.bot_loop_start(self.now)
+            self.assertEqual(paper_status(folder, now=self.now.timestamp())["health"]["status"], "blocked")
+            with patch.object(Trade, "get_trades_proxy", return_value=[]), patch.object(Trade, "get_total_closed_profit", return_value=0):
+                self.strategy.bot_loop_start(self.now)
+            self.assertIsNotNone(self.strategy.snapshot)
+            self.assertTrue(self.strategy.state.halted)
+            self.assertFalse(paper_status(folder, now=self.now.timestamp())["ready_for_new_entries"])
+            self.strategy.journal.close()
 
     def test_stop_uses_persisted_entry_value(self):
         trade = SimpleNamespace(get_custom_data=lambda key: 96.0)
