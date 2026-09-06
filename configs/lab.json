@@ -1,0 +1,20 @@
+{
+  "dry_run": true,
+  "initial_balance": 1000.0,
+  "pairs": ["BTC/USDT", "ETH/USDT"],
+  "risk_per_trade": 0.0025,
+  "max_open_risk": 0.005,
+  "max_asset_exposure": 0.2,
+  "max_total_exposure": 0.4,
+  "daily_loss_limit": 0.01,
+  "drawdown_limit": 0.05,
+  "max_open_trades": 2,
+  "fee": 0.001,
+  "slippage_bps": 5,
+  "spread_bps": 2,
+  "trend_period": 200,
+  "breakout_period": 20,
+  "exit_period": 10,
+  "atr_period": 14,
+  "atr_multiple": 2
+}

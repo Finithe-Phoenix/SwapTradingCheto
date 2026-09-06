@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.env
+data/
+runs/
+runtime/
+*.sqlite*
+user_data/*
+!user_data/strategies/
+user_data/strategies/__pycache__/
+.coverage

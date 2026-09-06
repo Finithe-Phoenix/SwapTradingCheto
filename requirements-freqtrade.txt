@@ -1,0 +1,2 @@
+# Integration runtime for local adapter tests. Docker uses the corresponding release image.
+freqtrade==2026.8
