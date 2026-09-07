@@ -153,3 +153,5 @@ El repositorio entrega código, pruebas y evidencia histórica parcial. El diagn
 El siguiente trabajo es definir y probar el tratamiento de interrupciones históricas del mercado, completar desarrollo, comparar los dos motores y acumular datos prospectivos. La validación 2024–2025 y la prueba final 2026 permanecen sin evaluar en esta versión. El objetivo de 100 operaciones sirve para revisar evidencia; no activa dinero real.
 
 Documentación adicional: [diseño](docs/ARCHITECTURE.md), [plan y alcance](docs/PLAN.md) y [operación](docs/OPERATIONS.md).
+
+La [hoja de ruta hacia 1.0](docs/ROADMAP.md) prioriza protección, datos, investigación, API/panel, operación e IA con criterios de aceptación. Describe trabajo pendiente; la versión ejecutable actual sigue siendo 0.2.0.
